@@ -1,0 +1,226 @@
+\documentclass[]{article}
+\usepackage[spanish]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{graphicx}
+
+%opening
+\title{Pronóstico de precios de criptomonedas}
+\author{Sergio Andrés Elizondo}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+
+En este estudio, se presenta un modelo multivariado para la predicción del precio de criptomonedas, integrándolo en una estrategia automatizada de compra-venta. Utilizando datos históricos por minuto de varias criptomonedas (BTC, ETH, XRP, LTC, ADA) se emplea un modelo de aprendizaje profundo basado en LSTM bidireccional y GRU para las predicciones.
+
+Con base en estas predicciones, se desarrolló una estrategia de compra-venta basada en los resultados del modelo, incorporando reglas predefinidas para obtener ganancias (\textit{take profit}) o evitar pérdidas (\textit{stop loss}).
+
+Se establecen las bases para un marco robusto que combine el análisis predictivo con estrategias financieras en un entorno de alta volatilidad como es el mercado de las criptomonedas. 
+
+\end{abstract}
+
+\section{Introducción}
+
+El mercado de criptomonedas ha emergido como un entorno financiero altamente dinámico y complejo, caracterizado por la alta volatilidad y la interacción de múltiples variables endógenas y exógenas. Este entorno plantea desafíos significativos para los participantes del mercado que buscan optimizar sus estrategias de inversión mediante la predicción precisa de los precios futuros y la ejecución automatizada de operaciones.
+
+Las criptomonedas no solo presentan dinámicas internas de oferta y demanda, sino que también forman redes de interdependencias que afectan sus precios. En particular, el precio del \textit{Bitcoin} es susceptible a variaciones en criptomonedas como \textit{Ether}, XRP y ADA, debido a factores como correlaciones de mercado o burbujas financieras compartidas.\cite{haykir}.
+
+El desarrollo de modelos predictivos en este contexto requiere la integración de técnicas avanzadas de análisis multivariado y series temporales. Estos modelos deben considerar la naturaleza no estacionaria de los datos, los patrones estocásticos y las interdependencias entre activos financieros. Los modelos tradicionales a menudo no logran capturar la dinámica no lineal ni las dependencias temporales complejas en los mercados de criptomonedas.
+
+Para superar estas limitaciones, en el presente trabajo se utiliza un enfoque basado en redes neuronales recurrentes (RNN), específicamente \textit{Long Short-Term Memory} (LSTM) y \textit{Gated Recurrent Units} (GRU), con el fin de capturar las relaciones temporales multivariadas entre diferentes criptomonedas. Estas arquitecturas han demostrado ser altamente efectivas para modelar datos secuenciales multivariados. \cite{s22093348}
+
+\section{Metodología}
+
+A continuación, se describen las etapas de obtención, procesamiento y modelado de datos, así como el diseño de la estrategia de inversión y los métodos de evaluación.
+
+\subsection{Obtención de datos}
+Los datos históricos por minuto de los precios de criptomonedas fueron obtenidos a través de la interfaz (\textit{API}) de \textit{Binance}, accediendo a ella mediante la biblioteca \texttt{ccxt}. Se seleccionaron cinco criptomonedas: \textit{Bitcoin} (BTC), \textit{Ether} (ETH), XRP, \textit{Litecoin} (LTC) y ADA, usando como precio base \textit{Tether} (USDT).
+
+El rango temporal del estudio abarcó los últimos tres meses, con un total de $132777$ datos. Los datos se almacenaron en archivos en formato \textit{CSV} para facilitar su reutilización.
+
+\subsection{Procesamiento de datos}
+\begin{enumerate}
+	\item \textbf{Escalamiento de características}: Se le aplicó una normalización estándar a los precios de cierre (\(P_t\)) de las criptomonedas:
+	\[
+	Z_{i,t} = \frac{P_{i, t} - \mu_i}{\sigma_i}
+	\]
+	donde \(\mu_i\) y \(\sigma_i\) representan la media y la desviación típica de la criptomoneda \(i\), respectivamente.
+	
+	Este proceso garantiza que las características se encuentren en una escala comparable, mitigando problemas de convergencia en el modelo.
+	
+	\item \textbf{Construcción de secuencias multivariadas}: Se empleó una ventana deslizante de tamaño \(L = 60\) para construir secuencias de entrada, formando un tensor \(X \in \mathbb{R}^{3}\) con dimensiones \(N \times L \times d\), donde \(N\) es el número total de muestras, \(L\) es la longitud de la secuencia temporal y \(d = 5\) es el número de criptomonedas consideradas. Las etiquetas \(y \in \mathbb{R}\) corresponden a los \(N\) valores de \(Z_{BTC}\) desplazados \(L\) pasos hacia adelante.
+\end{enumerate}
+
+\subsection{Diseño del modelo}
+El modelo propuesto combina arquitecturas de redes neuronales recurrentes (RNN) para capturar patrones temporales y relaciones multivariadas:
+
+\begin{enumerate}
+	\item \textbf{Capas recurrentes}: El tensor de entrada (con dimensiones \(N \times L \times d\)) es procesado por dos subredes:
+	\begin{itemize}
+		\item Una red \textit{BiLSTM} (\textit{Bidirectional Long Short-Term Memory}) con unidades ajustables \(u_{\text{LSTM}}\) que aprende de las dependencias temporales tanto pasadas como futuras:
+		\[
+		h^\text{LSTM} = \text{LSTM}(X, u_\text{LSTM})
+		\]
+		\item Una red \textit{GRU} (\textit{Gated Recurrent Unit}) con parametrización \(u_\text{GRU}\) que modela patrones temporales más sencillos y tiene menor costo computacional:
+		\[
+		h^\text{GRU} = \text{GRU}(X, u_\text{GRU}),
+		\]
+	\end{itemize}
+	
+	\item \textbf{Capa de concatenación}: Las salidas \(h^\text{LSTM}\) y \(h^\text{GRU}\) se concatenan:
+	\[
+	h^\text{concat} = [h^\text{LSTM}, h^\text{GRU}].
+	\]
+	
+	\item \textbf{Capa densa y de salida}: Una capa densa con activación ReLU procesa \(h^\text{concat}\):
+	\[
+	h^\text{dense} = \text{ReLU}(W h^\text{concat} + b),
+	\]
+	donde \(W\) y \(b\) son los pesos y sesgo de la capa.
+	
+	Por último una capa densa con una sola neurona de salida predice el precio normalizado \(y\).
+	
+	\item \textbf{Optimización de hiperparámetros}: Los parámetros \(u_\text{LSTM}\), \(u_\text{GRU}\) y el tamaño de la capa densa fueron optimizados mediante el algoritmo \textit{Hyperband}, utilizando la implementación de la biblioteca \textit{Keras Tuner}. Los parámetros elegidos después de la optimización son los siguientes:
+	\begin{itemize}
+		\item Unidades LSTM: 50
+		\item Unidades GRU: 100
+		\item Unidades densas: 150
+	\end{itemize}
+	La pérdida utilizada fue el error cuadrático promedio (MSE):
+	\[
+	\mathcal{L}(y, \hat{y}) = \frac{1}{N} \sum_{i=1}^N (y_i - \hat{y}_i)^2.
+	\]
+\end{enumerate}
+
+\subsection{Estrategia de inversión}
+Se diseñó una estrategia de compra-venta clásica basada en las predicciones del modelo. \cite{sec_trading101} Los criterios de decisión de dicha estrategia son los siguientes:
+\begin{enumerate}
+	\item \textbf{Entrada en posición}:
+	\begin{itemize}
+		\item Compra (\textit{long}) si \(\hat{y}_{t+1} > (1 + \text{threshold}) y_t\).
+		\item Venta (\textit{short}) si \(\hat{y}_{t+1} < (1 - \text{threshold}) y_t\).
+	\end{itemize}
+	
+	\item \textbf{Salida de posición}: Se definen reglas de obtención de ganancias (\textit{take profit}) y de prevención de pérdidas (\textit{stop loss}) basadas en cambios porcentuales \(\Delta\):
+	\[
+	\Delta = \frac{P_\text{actual} - P_\text{entrada}}{P_\text{entrada}}.
+	\]
+\end{enumerate}
+
+Se registran las ganancias y pérdidas netas para evaluar el desempeño de la estrategia.
+
+\subsection{Evaluación del modelo}
+El modelo se evalúa mediante las siguientes métricas:
+\begin{itemize}
+	\item Error cuadrático promedio (\textit{Mean Squared Error, MSE}):
+	\[
+	\text{MSE} = \frac{1}{N} \sum_{i=1}^N (y_i - \hat{y}_i)^2.
+	\]
+	
+	\item Error absoluto promedio (\textit{Mean Absolute Error, MAE}):
+	\[
+	\text{MAE} = \frac{1}{N} \sum_{i=1}^N |y_i - \hat{y}_i|.
+	\]
+	\item Raíz del error cuadrático promedio (\textit{Root Mean Squared Error, RMSE}):
+	\[
+	\text{RMSE} = \sqrt{\text{MSE}}.
+	\]
+	\item Coeficiente de determinación (\(R^2\)):
+	\[
+	R^2 = 1 - \frac{\sum_{i=1}^N (y_i - \hat{y}_i)^2}{\sum_{i=1}^N (y_i - \bar{y})^2}.
+	\]
+	\item Error porcentual absoluto promedio (\textit{Mean Absolute Percentage Error, MAPE}):
+	\[
+	\text{MAPE} = \frac{1}{N} \sum_{i=1}^N \left| \frac{y_i - \hat{y}_i}{y_i} \right| \times 100.
+	\]
+\end{itemize}
+
+Estas métricas se utilizan para comparar el enfoque multivariado propuesto en este trabajo con un modelo base: Predicción de \textit{BTC} de una sola variable usando \textit{LSTM}.
+
+Además, se evalúa el desempeño financiero analizando el balance final de la inversión simulada (métricas de retorno de inversión de la estrategia algorítmica).
+
+\section{Resultados}
+
+\subsection{Comparación de métricas de modelos}
+
+A continuación, se presentan las métricas de desempeño obtenidas mediante un enfoque tradicional (sin considerar relaciones multivariadas) y un enfoque multivariado. Los resultados se muestran en la Tabla \ref{tab:metrics_comparison}.
+
+\begin{table}[H]
+	\centering
+	\caption{Comparación de métricas de modelos.}
+	\label{tab:metrics_comparison}
+	\begin{tabular}{lcc}
+		\toprule
+		\textbf{Métrica} & \textbf{Enfoque Tradicional} & \textbf{Enfoque Multivariado} \\
+		\midrule
+		MSE & $85,188,673$ & $430,852$ \\
+		MAE & $6,180.87$ & $495.48$ \\
+		RMSE & $9,229.77$ & $656.39$ \\
+		$R^2$ & $0.60$ & $0.96$ \\
+		MAPE & $0.59\%$ & $0.51\%$ \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=0.8\textwidth]{images/out1.png}
+	\caption{Predicción con enfoque tradicional.}
+	\label{fig:performance_normal}
+\end{figure}
+
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=0.8\textwidth]{images/out2.png}
+	\caption{Predicción con enfoque multivariado.}
+	\label{fig:performance_multivariate}
+\end{figure}
+
+Como se observa, el enfoque multivariado muestra un desempeño significativamente superior en todas las métricas analizadas. En particular, el error cuadrático promedio (MSE) y el error absoluto promedio (MAE) se redujeron sustancialmente, lo cual sugiere una mayor precisión del modelo multivariado. Además, el coeficiente de determinación ($R^2$) incrementó de $0.60$ a $0.96$, lo que implica que el modelo multivariado captura con mayor fidelidad la variabilidad en el precio del \textit{Bitcoin}.
+
+\subsection{Análisis de inversión}
+
+Se realizó una simulación de una inversión utilizando la estrategia sugerida durante un período de $9$ días (del 16 al 25 de Noviembre). En este período el capital inicial ($1$ USD) creció a un valor final de $1.0337$. Se calcula la tasa de crecimiento diaria promedio:
+
+\begin{equation}
+	g_d = \left( \frac{C_{\text{final}}}{C_{\text{inicial}}} \right)^{\frac{1}{n}} - 1 = \left( \frac{1.0337}{1.0} \right)^{\frac{1}{9}} - 1 \approx 0.0037 \, \text{(0.37\% por día)}.
+\end{equation}
+
+donde $C_{\text{final}} = 1.0337$, $C_{\text{inicial}} = 1.0$, y $n = 9$ días. Se calcula el rendimiento anual mediante la siguiente fórmula:
+
+\begin{equation}
+	g_a = (1 + 0.0037)^{365} - 1 \approx 2.84 \, \text{(284\% anual)}.
+\end{equation}
+
+El análisis muestra que nuestro sistema tiene el potencial de generar rendimientos significativos a lo largo del tiempo (asumiendo consistencia del modelo en períodos más extensos).
+
+\section{Conclusiones}
+
+El presente trabajo ha demostrado la capacidad de los modelos multivariados basados en redes neuronales recurrentes, específicamente la combinación de arquitecturas \textit{LSTM}  y \textit{GRU}, para predecir con una precisión aceptable los precios de criptomonedas en un entorno altamente volátil. La incorporación de los valores de múltiples criptomonedas permitió capturar patrones temporales complejos e interdependientes no triviales entre los activos considerados.
+
+En términos de desempeño predictivo, el modelo propuesto superó significativamente al enfoque univariado, logrando una reducción del $92\%$ en el error absoluto promedio (MAE). A nivel práctico, las predicciones del modelo se tradujeron en una estrategia de compra-venta exitosa, demostrando su aplicabilidad para optimizar decisiones financieras automatizadas.
+
+Sin embargo, este estudio también identificó oportunidades de mejora y expansión que podrían incrementar la efectividad del modelo, entre las cuales destacan las siguientes:
+\begin{enumerate}
+	\item La exploración de arquitecturas más avanzadas como los transformadores y las redes convolucionales temporales podría mejorar la precisión del modelo.
+	\item Ampliar el enfoque para predecir precios futuros en horizontes temporales extendidos permitiría desarrollar estrategias de compra-venta más sofisticadas.
+	
+	\item Incorporar datos con diferentes resoluciones temporales, como precios por segundo o por hora, permitiría capturar patrones específicos de alta frecuencia y baja frecuencia.
+	
+	\item Incluir indicadores técnicos, volúmenes de transacción o métricas de sentimiento del mercado podría fortalecer las predicciones.
+\end{enumerate}
+
+En conclusión, este trabajo representa un paso significativo hacia el desarrollo de un sistema predictivo más robusto, haciendo posible la construcción de herramientas más precisas y versátiles para la toma de decisiones financieras.
+
+\newpage
+\bibliographystyle{IEEEtran}
+\bibliography{report}
+
+\end{document}
